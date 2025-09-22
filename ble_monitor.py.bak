@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+  import asyncio, csv, os, signal, time, hashlib
+  from datetime import datetime, timezone
+  from bleak import BleakScanner
+
+  SESSION_TIMEOUT_S = 120
+  FLUSH_INTERVAL_S = 5
+  DATA_DIR = os.path.join(os.path.dirname(file), "data")
+  STORE_RAW_ADDRESS = True
+  SALT = os.environ.get("BLE_SALT", "")
+
+  sessions = {}
+  running = True
+
+  def ts_now():
+      return time.time()
+
+  def iso(ts):
+      return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+
+  def anon_id(addr: str) -> str:
+      if not SALT:
+          return addr
+      return hashlib.sha256((SALT + addr).encode()).hexdigest()[:16]
+
+  def sessions_csv_path(ts=None):
+      d = datetime.fromtimestamp(ts or ts_now(), tz=timezone.utc).strftime("%Y-%m-%d")
+      return os.path.join(DATA_DIR, f"sessions-{d}.csv")
+
+  def ensure_header(path):
+      os.makedirs(os.path.dirname(path), exist_ok=True)
+      if not os.path.exists(path):
+          with open(path, "w", newline="") as f:
+              w = csv.writer(f)
+              cols = ["id", "start_utc", "end_utc", "duration_s", "mean_rssi"]
+              if STORE_RAW_ADDRESS and not SALT:
+                  cols.append("mac")
+              w.writerow(cols)
+
+  def write_session(addr, start_ts, end_ts, mean_rssi):
+      path = sessions_csv_path(start_ts)
+      ensure_header(path)
+      row = [anon_id(addr), iso(start_ts), iso(end_ts), round(end_ts - start_ts), mean_rssi]
+      if STORE_RAW_ADDRESS and not SALT:
+          row.append(addr)
+      with open(path, "a", newline="") as f:
+          csv.writer(f).writerow(row)
+
+  def handle_advertisement(device, adv_data):
+      addr = device.address
+      now = ts_now()
+      rssi = device.rssi or 0
+      s = sessions.get(addr)
+      if s:
+          s["last_ts"] = now
+          s["rssi_sum"] += rssi
+          s["rssi_count"] += 1
+      else:
+          sessions[addr] = {"start_ts": now, "last_ts": now, "rssi_sum": rssi, "rssi_count":
+  1}
+
+  async def flush_loop():
+      while running:
+          await asyncio.sleep(FLUSH_INTERVAL_S)
+          now = ts_now()
+          stale = []
+          for addr, s in list(sessions.items()):
+              if now - s["last_ts"] >= SESSION_TIMEOUT_S:
+                  stale.append((addr, s))
+          for addr, s in stale:
+              mean_rssi = int(s["rssi_sum"] / max(1, s["rssi_count"]))
+              write_session(addr, s["start_ts"], s["last_ts"], mean_rssi)
+              sessions.pop(addr, None)
+
+  def stop(*_):
+      global running
+      running = False
+
+  async def main():
+      signal.signal(signal.SIGINT, stop)
+      signal.signal(signal.SIGTERM, stop)
+      os.makedirs(DATA_DIR, exist_ok=True)
+      scanner = BleakScanner(callback=handle_advertisement)
+      await scanner.start()
+      flusher = asyncio.create_task(flush_loop())
+      try:
+          while running:
+              await asyncio.sleep(1)
+      finally:
+          await scanner.stop()
+          await asyncio.sleep(0.1)
+          now = ts_now()
+          for addr, s in list(sessions.items()):
+              mean_rssi = int(s["rssi_sum"] / max(1, s["rssi_count"]))
+              write_session(addr, s["start_ts"], now, mean_rssi)
+              sessions.pop(addr, None)
+          flusher.cancel()
+          try:
+              await flusher
+          except:
+              pass
+
+  if name == "main":
+      asyncio.run(main())
