@@ -1,4 +1,4 @@
-# Ignorar entornos virtuales
+# Entornos virtuales
 .venv/
 venv/
 
@@ -6,7 +6,7 @@ venv/
 __pycache__/
 *.pyc
 
-# Datos crudos CSV (solo guardamos los comprimidos)
+# Datos crudos CSV (se subirán solo los paquetes .tar.gz)
 data/*.csv
 data/*.csv.gz
 
@@ -14,4 +14,3 @@ data/*.csv.gz
 *.swp
 *.bak
 *.tmp
-
