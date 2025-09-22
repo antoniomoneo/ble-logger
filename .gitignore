@@ -1,0 +1,17 @@
+# Ignorar entornos virtuales
+.venv/
+venv/
+
+# Archivos compilados de Python
+__pycache__/
+*.pyc
+
+# Datos crudos CSV (solo guardamos los comprimidos)
+data/*.csv
+data/*.csv.gz
+
+# Archivos temporales
+*.swp
+*.bak
+*.tmp
+
