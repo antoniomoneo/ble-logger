@@ -1,0 +1,34 @@
+name: Process BLE Data
+
+on:
+  push:
+    paths:
+      - "data-*.tar.gz"
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v3
+
+    - name: Extract tar.gz files
+      run: |
+        mkdir extracted
+        for f in data-*.tar.gz; do
+          [ -e "$f" ] || continue
+          tar -xzf "$f" -C extracted/
+        done
+
+    - name: Merge CSV sessions
+      run: |
+        mkdir -p outputs
+        echo "id,start_utc,end_utc,duration_s,mean_rssi,mac" > outputs/all_sessions.csv
+        find extracted -name "sessions-*.csv" -type f -exec tail -n +2 {} \; >> outputs/all_sessions.csv
+
+    - name: Upload merged CSV as artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: merged-sessions
+        path: outputs/all_sessions.csv
